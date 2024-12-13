@@ -75,3 +75,43 @@ def load_caltech256(args, dataset_path, indices_path):
 	test_loader = torch.utils.data.DataLoader(test_data, batch_size=1, num_workers=4, pin_memory=True)
 
 	return train_loader, val_loader, test_loader
+
+
+
+def load_fft_caltech256(args, dataset_path, indices_path):
+
+	mean, std = [0.457342265910642, 0.4387686270106377, 0.4073427106250871], [0.26753769276329037, 0.2638145880487105, 0.2776826934044154]
+
+	torch.manual_seed(args.seed)
+
+	transformations_train = transforms.Compose([
+		transforms.Resize((args.input_dim, args.input_dim)),
+		transforms.CenterCrop((args.dim, args.dim)),
+		transforms.ToTensor(), 
+		transforms.Normalize(mean = mean, std = std),
+		])
+
+	transformations_test = transforms.Compose([
+		transforms.Resize((args.input_dim, args.input_dim)),
+		transforms.CenterCrop((args.dim, args.dim)),
+		transforms.ToTensor(), 
+		transforms.Normalize(mean = mean, std = std),
+		])
+
+	# This block receives the dataset path and applies the transformation data. 
+	train_set = datasets.ImageFolder(dataset_path, transform=transformations_train)
+	val_set = datasets.ImageFolder(dataset_path, transform=transformations_test)
+	test_set = datasets.ImageFolder(dataset_path, transform=transformations_test)
+
+	train_idx, val_idx, test_idx = get_indices(train_set, args.split_ratio, indices_path)
+
+	train_data = torch.utils.data.Subset(train_set, indices=train_idx)
+	val_data = torch.utils.data.Subset(val_set, indices=val_idx)
+	test_data = torch.utils.data.Subset(test_set, indices=test_idx)
+
+	train_loader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size_train, 
+		shuffle=True, num_workers=4, pin_memory=True)
+	val_loader = torch.utils.data.DataLoader(val_data, batch_size=1, num_workers=4, pin_memory=True)
+	test_loader = torch.utils.data.DataLoader(test_data, batch_size=1, num_workers=4, pin_memory=True)
+
+	return train_loader, val_loader, test_loader

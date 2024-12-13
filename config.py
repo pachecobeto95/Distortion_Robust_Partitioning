@@ -90,4 +90,4 @@ distorted_dataset_path = os.path.join(DIR_PATH, "distorted_datasets", "caltech25
 noise_list = [0, 0.5, 1, 1.5, 2, 2.5, 3]
 blur_list = [0, 2, 4, 6]
 
-distortion_level_dict = {"blur": blur_list, "noise": noise_list}
+distortion_level_dict = {"blur": blur_list, "noise": noise_list, "pristine": [0]}
