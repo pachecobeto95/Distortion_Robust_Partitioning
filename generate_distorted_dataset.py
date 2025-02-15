@@ -12,6 +12,10 @@ class ImageProcessor(object):
 		self.dist_img = cv2.GaussianBlur(self.image, (self.distortion_lvl+1, self.distortion_lvl+1), 
 			self.distortion_lvl)
 
+	def pristine(self):
+		self.dist_img = self.image
+
+
 	def noise(self):
 		noise = np.random.normal(0, self.distortion_lvl, self.image.shape).astype(np.uint8)
 		self.dist_img = cv2.add(self.image, noise)
@@ -80,7 +84,7 @@ if (__name__ == "__main__"):
 	parser.add_argument('--dataset_name', type=str, default='caltech256', 
 		choices=["caltech256"], help='Dataset name (default: Caltech-256)')
 
-	parser.add_argument('--distortion_type', type=str, choices=["blur", "noise"], help='Distortion Type')
+	parser.add_argument('--distortion_type', type=str, choices=["blur", "noise", "pristine"], help='Distortion Type')
 
 	args = parser.parse_args()
 

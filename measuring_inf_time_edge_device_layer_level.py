@@ -6,12 +6,11 @@ import torch.optim as optim
 import torch.nn as nn
 import pandas as pd
 
-def extracting_ee_inference_data(args, test_loader, model, device, distortion_lvl):
+def extracting_ee_inference_time_edge_device_layer_level(args, test_loader, model, device):
 
 	n_exits = args.n_branches + 1	
-	conf_list, correct_list, delta_inf_time_list, cum_inf_time_list = [], [], [], []
-	prediction_list, target_list = [], []
-
+	inf_time_layer_list, inf_time_branches_list, target_list = [], [], []
+	
 	model.eval()
 	with torch.no_grad():
 		for (data, target) in tqdm(test_loader):	
@@ -20,30 +19,22 @@ def extracting_ee_inference_data(args, test_loader, model, device, distortion_lv
 			data, target = data.to(device), target.to(device)
 
 			# Obtain confs and predictions for each side branch.
-			_, conf_branches, predictions_branches, delta_inf_time_branches, cum_inf_time_branches = model.forwardExtractingInferenceData(data)
+			inf_time_layer, inf_time_branches = model.forwardExtractingInferenceTimeLayerLevelEdge(data)
 
-			conf_list.append([conf_branch.item() for conf_branch in conf_branches]), delta_inf_time_list.append(delta_inf_time_branches)
-			cum_inf_time_list.append(cum_inf_time_branches)
+			inf_time_layer_list.append(inf_time_layer), inf_time_branches_list.append(inf_time_branches)
+			target_list.append(target.item())
+			n_layers = len(inf_time_layer)
 
-			correct_list.append([predictions_branches[i].eq(target.view_as(predictions_branches[i])).sum().item() for i in range(n_exits)])
-			target_list.append(target.item()), prediction_list.append([predictions_branches[i].item() for i in range(n_exits)])
+	inf_time_layer_list, inf_time_branches_list = np.array(inf_time_layer_list), np.array(inf_time_branches_list)
 
-	conf_list, correct_list, delta_inf_time_list = np.array(conf_list), np.array(correct_list), np.array(delta_inf_time_list)
-	cum_inf_time_list, prediction_list = np.array(cum_inf_time_list), np.array(prediction_list)
+	result_dict = {"device": len(target_list)*[str(device)]}
 
-	accuracy_branches = [sum(correct_list[:, i])/len(correct_list[:, i]) for i in range(n_exits)]
-
-	print("Accuracy: %s"%(accuracy_branches))
-	result_dict = {"device": len(target_list)*[str(device)],
-	"target": target_list, "distortion_lvl": len(target_list)*[distortion_lvl], 
-	"distortion_type": len(target_list)*[args.distortion_type]}
+	
+	for j in range(n_layers):
+		result_dict["proc_time_layers_%s"%(j+1)] = inf_time_layer_list[:, j]
 
 	for i in range(n_exits):
-		result_dict["conf_branch_%s"%(i+1)] = conf_list[:, i]
-		result_dict["correct_branch_%s"%(i+1)] = correct_list[:, i]
-		result_dict["delta_inf_time_branch_%s"%(i+1)] = delta_inf_time_list[:, i]
-		result_dict["cum_inf_time_branch_%s"%(i+1)] = cum_inf_time_list[:, i]
-		result_dict["prediction_branch_%s"%(i+1)] = prediction_list[:, i]
+		result_dict["proc_time_branches_%s"%(i+1)] = inf_time_branches_list[:, i]
 
 	#Converts to a DataFrame Format.
 	df = pd.DataFrame(np.array(list(result_dict.values())).T, columns=list(result_dict.keys()))
@@ -59,31 +50,26 @@ def main(args):
 
 	device = torch.device(device_str)
 
-	model_path = os.path.join(config.DIR_PATH, args.model_name, "models", "ee_model_%s_%s_branches_%s_id_%s.pth"%(args.model_name, 
-		args.n_branches, args.loss_weights_type, args.model_id))
-
 	indices_path = os.path.join(config.DIR_PATH, "indices_%s.pt"%(args.dataset_name))
 
 	inf_data_dir_path = os.path.join(config.DIR_PATH, args.model_name, "inference_data")
 	os.makedirs(inf_data_dir_path, exist_ok=True)
 
-	inf_data_path = os.path.join(inf_data_dir_path, 
-		"%s_inf_data_ee_%s_%s_branches_%s_id_%s_%s.csv"%(args.distortion_type, args.model_name, 
+	inf_data_path = os.path.join(inf_data_dir_path, "proc_time_layer_level_ee_%s_%s_branches_%s_id_%s_%s.csv"%(args.model_name, 
 		args.n_branches, args.loss_weights_type, args.model_id, args.location))
 	
-	ee_model = ee_dnns.load_eednn_model(args, n_classes, model_path, device)
+	ee_model = ee_dnns.Early_Exit_DNN(args.model_name, n_classes, args.pretrained, args.n_branches, 
+		args.dim, args.exit_type, device, args.distribution)
+
+	dataset_path = os.path.join("datasets", "caltech256")
+
+	_, _, test_loader = utils.load_caltech256(args, dataset_path, indices_path)
+
+
+	df_inf_time = extracting_ee_inference_time_edge_device_layer_level(args, test_loader, ee_model, device)
+
+	df_inf_time.to_csv(inf_data_path, mode='a', header=not os.path.exists(inf_data_path))
 	
-	for distortion_lvl in config.distortion_level_dict[args.distortion_type]:
-		print("Distortion Type: %s, Distortion Level: %s"%(args.distortion_type, distortion_lvl))
-
-		dataset_path = os.path.join("distorted_datasets", args.dataset_name, args.distortion_type, 
-			str(distortion_lvl))
-
-		_, _, test_loader = utils.load_caltech256(args, dataset_path, indices_path)
-
-		df_inf_data = extracting_ee_inference_data(args, test_loader, ee_model, device, distortion_lvl)
-
-		df_inf_data.to_csv(inf_data_path, mode='a', header=not os.path.exists(inf_data_path))
 
 
 if (__name__ == "__main__"):
@@ -130,12 +116,8 @@ if (__name__ == "__main__"):
 	parser.add_argument('--batch_size_train', type=int, default=config.batch_size_train, 
 		help='Train Batch Size. Default: %s'%(config.batch_size_train))
 
-	parser.add_argument('--location', type=str, help='Which machine extracts the inference data', choices=["pechincha", "jetson", "RO"],
+	parser.add_argument('--location', type=str, help='Which machine extracts the inference data', choices=["pechincha", "jetson", "RO", "laptop"],
 		default="RO")
-
-	parser.add_argument('--distortion_type', type=str, help='Distoriton Type applyed in dataset.',
-		choices=["blur", "noise", "pristine"])
-
 
 	args = parser.parse_args()
 

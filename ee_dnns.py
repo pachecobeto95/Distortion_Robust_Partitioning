@@ -1,5 +1,5 @@
 import torchvision
-import os, sys, time, math
+import os, sys, time, math, time
 #from torchvision import transforms, utils, datasets
 from PIL import Image
 import torch, functools
@@ -268,6 +268,50 @@ class Early_Exit_DNN(nn.Module):
 		self.softmax = nn.Softmax(dim=1)
 
 
+	def forwardExtractingInferenceTimeLayerLevelEdge(self, x):
+		"""
+		This method runs the DNN model during the training phase.
+		x (tensor): input image
+		"""
+		
+		inf_time_layer_list, inf_time_branches_list  = [], []
+
+		for i, exitBlock in enumerate(self.exits):
+
+			for layer in self.stages[i]:
+				starter = time.time()
+				x = layer(x)
+				ender = time.time()
+				curr_time = ender - starter
+				inf_time_layer_list.append(1000*curr_time)
+
+			starter = time.time()
+			output_branch = exitBlock(x)
+			ender = time.time()
+			curr_time = ender - starter
+
+			inf_time_branches_list.append(1000*curr_time)
+
+
+		for layer in self.stages[-1]:
+			starter = time.time()
+			x = layer(x)
+			ender = time.time()
+			curr_time = ender - starter
+			inf_time_layer_list.append(1000*curr_time)
+
+		x = torch.flatten(x, 1)
+
+
+		starter = time.time()
+		output = self.classifier(x)
+		ender = time.time()
+		curr_time = ender - starter
+		inf_time_branches_list.append(1000*curr_time)
+
+
+		return inf_time_layer_list, inf_time_branches_list
+
 	def forwardExtractingInferenceData(self, x):
 		"""
 		This method runs the DNN model during the training phase.
@@ -275,14 +319,15 @@ class Early_Exit_DNN(nn.Module):
 		"""
 		
 		output_list, conf_list, class_list, inf_time_list  = [], [], [], []
-		starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+		#starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
 		cumulative_inf_time = 0.0
 
 		for i, exitBlock in enumerate(self.exits):
 
 			#This lines starts a timer to measure processing time
-			starter.record()
+			#starter.record()
+			starter = time.time()
 
 			#This line process a DNN backbone until the (i+1)-th side branch (early-exit)
 			x = self.stages[i](x)
@@ -296,15 +341,18 @@ class Early_Exit_DNN(nn.Module):
 			conf_branch, prediction = torch.max(self.softmax(output_branch), 1)
 
 			#This line terminates the timer started previously.
-			ender.record()
-			torch.cuda.synchronize()
-			curr_time = starter.elapsed_time(ender)
+			#ender.record()
+			#torch.cuda.synchronize()
+			#curr_time = starter.elapsed_time(ender)
+			ender = time.time()
+			curr_time = ender - starter
 
 			#This apprends the gathered confidences and classifications into a list
 			output_list.append(output_branch), conf_list.append(conf_branch), class_list.append(prediction), inf_time_list.append(curr_time)
 
 		#This measures the processing time for the last piece of DNN backbone
-		starter.record()
+		#starter.record()
+		starter = time.time()
 
 		#This executes the last piece of DNN backbone
 		x = self.stages[-1](x)
@@ -316,10 +364,11 @@ class Early_Exit_DNN(nn.Module):
 		infered_conf, infered_class = torch.max(self.softmax(output), 1)
 
 		#This ends the timer
-		ender.record()
-		torch.cuda.synchronize()
-		curr_time = starter.elapsed_time(ender)
-
+		#ender.record()
+		#torch.cuda.synchronize()
+		#curr_time = starter.elapsed_time(ender)
+		ender = time.time()
+		curr_time = ender - starter
 
 		output_list.append(output)
 		conf_list.append(infered_conf), class_list.append(infered_class), inf_time_list.append(curr_time)
@@ -441,3 +490,33 @@ class Early_Exit_DNN(nn.Module):
 			conf_list.append(conf.item()), infered_class_list.append(infered_class)
 			max_conf = np.argmax(conf_list)
 			return infered_class_list[max_conf], False, self.n_branches+1
+
+
+	def forwardExtractingOutputs(self, x):
+		"""
+		This method runs the DNN model during the training phase.
+		x (tensor): input image
+		"""
+		
+		output_list = []
+
+		for i, exitBlock in enumerate(self.exits):
+
+			for layer in self.stages[i]:
+				x = layer(x)
+				output_list.append(x)
+
+			output_branch = exitBlock(x)
+
+
+		for layer in self.stages[-1]:
+			x = layer(x)
+			output_list.append(x)
+
+		x = torch.flatten(x, 1)
+
+
+		output = self.classifier(x)
+		output_list.append(output)
+
+		return output_list
